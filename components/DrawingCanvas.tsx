@@ -31,6 +31,9 @@ export const DrawingCanvas = forwardRef<DrawingCanvasRef, DrawingCanvasProps>(
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const isDrawingRef = useRef(false)
     const hasInkRef = useRef(false)
+    const lastPointRef = useRef<{ x: number; y: number } | null>(null)
+    const strokeDistanceRef = useRef(0)
+    const strokeMovesRef = useRef(0)
 
     const resetCanvas = useCallback(() => {
       const canvas = canvasRef.current
@@ -42,6 +45,9 @@ export const DrawingCanvas = forwardRef<DrawingCanvasRef, DrawingCanvasProps>(
       ctx.fillStyle = "#ffffff"
       ctx.fillRect(0, 0, width, height)
       hasInkRef.current = false
+      lastPointRef.current = null
+      strokeDistanceRef.current = 0
+      strokeMovesRef.current = 0
     }, [height, width])
 
     useEffect(() => {
@@ -72,7 +78,10 @@ export const DrawingCanvas = forwardRef<DrawingCanvasRef, DrawingCanvasProps>(
           const canvas = canvasRef.current
           return canvas ? canvas.toDataURL("image/png") : ""
         },
-        hasDrawing: () => hasInkRef.current,
+        hasDrawing: () =>
+          hasInkRef.current &&
+          strokeMovesRef.current >= 10 &&
+          strokeDistanceRef.current >= 140,
       }),
       [resetCanvas]
     )
@@ -100,6 +109,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasRef, DrawingCanvasProps>(
       event.preventDefault()
       canvas.setPointerCapture(event.pointerId)
       isDrawingRef.current = true
+      lastPointRef.current = point
 
       ctx.beginPath()
       ctx.moveTo(point.x, point.y)
@@ -117,6 +127,13 @@ export const DrawingCanvas = forwardRef<DrawingCanvasRef, DrawingCanvasProps>(
       const point = getPoint(event)
 
       event.preventDefault()
+      if (lastPointRef.current) {
+        const dx = point.x - lastPointRef.current.x
+        const dy = point.y - lastPointRef.current.y
+        strokeDistanceRef.current += Math.hypot(dx, dy)
+      }
+      strokeMovesRef.current += 1
+      lastPointRef.current = point
       ctx.strokeStyle = brushColor
       ctx.lineWidth = brushSize
       ctx.lineTo(point.x, point.y)
@@ -135,6 +152,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasRef, DrawingCanvasProps>(
         canvas.releasePointerCapture(event.pointerId)
       }
       isDrawingRef.current = false
+      lastPointRef.current = null
     }
 
     return (
