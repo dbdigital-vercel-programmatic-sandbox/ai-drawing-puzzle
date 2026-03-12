@@ -43,45 +43,49 @@ function computeRoundScore(
   return Math.max(180, base - attemptsPenalty + speedBonus + earlyGuessBonus)
 }
 
-function buildHint(word: string, timeLeft: number): string {
+function makeSeed(input: string): number {
+  let hash = 2166136261
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+function buildHint(word: string, timeLeft: number, round: number): string {
   const revealMode =
     timeLeft > 38 ? "masked" : timeLeft > 20 ? "starter" : "vowels"
   const letters = word.split("")
+  const availableIndexes: number[] = []
 
-  if (revealMode === "masked") {
+  for (let index = 0; index < letters.length; index += 1) {
+    if (letters[index] !== " ") availableIndexes.push(index)
+  }
+
+  if (availableIndexes.length === 0 || revealMode === "masked") {
     return letters.map((char) => (char === " " ? " " : "_")).join("")
   }
 
-  if (revealMode === "starter") {
-    let revealNext = true
-    return letters
-      .map((char) => {
-        if (char === " ") {
-          revealNext = true
-          return " "
-        }
-        if (revealNext) {
-          revealNext = false
-          return char
-        }
-        return "_"
-      })
-      .join("")
+  const seed = makeSeed(`${word}-${round}`)
+  const shuffledIndexes = [...availableIndexes]
+  for (let index = shuffledIndexes.length - 1; index > 0; index -= 1) {
+    const swapIndex = (seed + index * 17 + round * 31) % (index + 1)
+    const current = shuffledIndexes[index]
+    shuffledIndexes[index] = shuffledIndexes[swapIndex]
+    shuffledIndexes[swapIndex] = current
   }
 
-  let revealNext = true
+  const revealCount =
+    revealMode === "starter"
+      ? Math.max(1, Math.ceil(availableIndexes.length * 0.35))
+      : Math.max(2, Math.ceil(availableIndexes.length * 0.62))
+
+  const revealSet = new Set(shuffledIndexes.slice(0, revealCount))
+
   return letters
-    .map((char) => {
-      if (char === " ") {
-        revealNext = true
-        return " "
-      }
-      if (revealNext) {
-        revealNext = false
-        return char
-      }
-      if (/[aeiou]/.test(char)) return char
-      return "_"
+    .map((char, index) => {
+      if (char === " ") return " "
+      return revealSet.has(index) ? char : "_"
     })
     .join("")
 }
@@ -100,13 +104,19 @@ function getHintProgress(timeLeft: number): number {
 }
 
 function getNudge(word: string): string {
-  const firstLetter = word[0]?.toUpperCase() ?? ""
-  return `Hint: it starts with ${firstLetter}.`
+  const compact = word.replace(/\s+/g, "")
+  if (!compact) return "Hint: keep watching the shape."
+
+  const middleIndex = Math.floor(compact.length / 2)
+  const letter =
+    compact[middleIndex]?.toUpperCase() ?? compact[0]?.toUpperCase()
+  return `Hint: it contains ${letter}.`
 }
 
 export default function Page() {
   const canvasRef = useRef<AIDrawingCanvasRef | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const guessedWordsRef = useRef<Set<string>>(new Set())
   const timeLeftRef = useRef(ROUND_SECONDS)
   const wordRef = useRef(WORDS_BY_DIFFICULTY.easy[0])
   const nudgesRef = useRef({ first: false, second: false })
@@ -133,7 +143,10 @@ export default function Page() {
   )
   const [guesses, setGuesses] = useState<GuessItem[]>([])
 
-  const hint = useMemo(() => buildHint(word, timeLeft), [word, timeLeft])
+  const hint = useMemo(
+    () => buildHint(word, timeLeft, round),
+    [word, timeLeft, round]
+  )
   const hintStage = useMemo(() => getHintStage(timeLeft), [timeLeft])
   const hintProgress = useMemo(() => getHintProgress(timeLeft), [timeLeft])
   const highScore = Math.max(savedHighScore, score)
@@ -298,6 +311,7 @@ export default function Page() {
       setAttempts(0)
       setAiFinished(false)
       setAutoNextCountdown(null)
+      guessedWordsRef.current.clear()
       nudgesRef.current = { first: false, second: false }
       setGuesses([])
       canvasRef.current?.clear()
@@ -336,6 +350,14 @@ export default function Page() {
 
     const rawGuess = guessInput.trim().toLowerCase()
     if (!rawGuess) return
+
+    if (guessedWordsRef.current.has(rawGuess)) {
+      setGuessInput("")
+      pushMessage("You already guessed that. Try a different word.", "ai")
+      return
+    }
+
+    guessedWordsRef.current.add(rawGuess)
 
     const nextAttempts = attempts + 1
     setAttempts(nextAttempts)
