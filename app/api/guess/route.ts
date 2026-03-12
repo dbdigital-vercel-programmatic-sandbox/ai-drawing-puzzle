@@ -1,23 +1,28 @@
 import { NextResponse } from "next/server"
 
-import { ALL_WORDS } from "@/utils/wordList"
-
 type GuessBody = {
   imageDataUrl?: string
   targetWord?: string
   timeElapsed?: number
 }
 
-function fallbackGuess(targetWord: string, timeElapsed: number): string {
-  const clampedElapsed = Math.max(0, Math.min(60, timeElapsed))
-  const chanceToSolve = Math.min(0.2 + clampedElapsed * 0.0125, 0.92)
+const FALLBACK_GUESSES = [
+  "unclear",
+  "scribble",
+  "line drawing",
+  "abstract shape",
+  "circle",
+  "triangle",
+  "rectangle",
+  "face",
+  "animal",
+  "object",
+  "symbol",
+]
 
-  if (Math.random() < chanceToSolve) {
-    return targetWord
-  }
-
-  const options = ALL_WORDS.filter((word) => word !== targetWord)
-  return options[Math.floor(Math.random() * options.length)]
+function fallbackGuess(timeElapsed: number): string {
+  if (timeElapsed < 8) return "unclear"
+  return FALLBACK_GUESSES[Math.floor(Math.random() * FALLBACK_GUESSES.length)]
 }
 
 function cleanGuess(rawGuess: string): string {
@@ -49,7 +54,7 @@ export async function POST(req: Request) {
 
   if (!apiKey) {
     return NextResponse.json({
-      guess: fallbackGuess(targetWord, timeElapsed),
+      guess: fallbackGuess(timeElapsed),
       source: "fallback",
     })
   }
@@ -70,7 +75,7 @@ export async function POST(req: Request) {
             content: [
               {
                 type: "input_text",
-                text: "You are classifying a simple sketch game drawing. Reply with one short object label only, lowercase, no punctuation.",
+                text: "You are classifying a simple sketch game drawing. Guess any object or concept you see; you are not limited to any predefined word list. If the sketch is incomplete or unclear, reply exactly: unclear. Reply with one short lowercase label only, no punctuation.",
               },
               {
                 type: "input_image",
@@ -84,7 +89,7 @@ export async function POST(req: Request) {
 
     if (!response.ok) {
       return NextResponse.json({
-        guess: fallbackGuess(targetWord, timeElapsed),
+        guess: fallbackGuess(timeElapsed),
         source: "fallback",
       })
     }
@@ -94,7 +99,7 @@ export async function POST(req: Request) {
 
     if (!guess) {
       return NextResponse.json({
-        guess: fallbackGuess(targetWord, timeElapsed),
+        guess: fallbackGuess(timeElapsed),
         source: "fallback",
       })
     }
@@ -102,7 +107,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ guess, source: "openai" })
   } catch {
     return NextResponse.json({
-      guess: fallbackGuess(targetWord, timeElapsed),
+      guess: fallbackGuess(timeElapsed),
       source: "fallback",
     })
   }
