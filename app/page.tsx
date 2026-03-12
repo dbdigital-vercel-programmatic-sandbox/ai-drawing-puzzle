@@ -27,6 +27,7 @@ import {
 type Phase = "start" | "playing" | "won" | "lost"
 
 const ROUND_SECONDS = 60
+const AUTO_NEXT_ROUND_SECONDS = 4
 const HIGH_SCORE_STORAGE_KEY = "ai-drawing-puzzle-high-score"
 
 function computeRoundScore(
@@ -127,6 +128,9 @@ export default function Page() {
   const [guessInput, setGuessInput] = useState("")
   const [attempts, setAttempts] = useState(0)
   const [aiFinished, setAiFinished] = useState(false)
+  const [autoNextCountdown, setAutoNextCountdown] = useState<number | null>(
+    null
+  )
   const [guesses, setGuesses] = useState<GuessItem[]>([])
 
   const hint = useMemo(() => buildHint(word, timeLeft), [word, timeLeft])
@@ -277,25 +281,29 @@ export default function Page() {
     }
   }, [phase, word])
 
-  const pickWord = () => {
+  const pickWord = useCallback(() => {
     if (dailyChallenge) return getDailyChallengeWord()
     return getRandomWord(difficulty)
-  }
+  }, [dailyChallenge, difficulty])
 
-  const beginRound = (nextRound: number) => {
-    const chosenWord = pickWord()
-    setWord(chosenWord)
-    setRound(nextRound)
-    setPhase("playing")
-    setTimeLeft(ROUND_SECONDS)
-    setRoundScore(0)
-    setGuessInput("")
-    setAttempts(0)
-    setAiFinished(false)
-    nudgesRef.current = { first: false, second: false }
-    setGuesses([])
-    canvasRef.current?.clear()
-  }
+  const beginRound = useCallback(
+    (nextRound: number) => {
+      const chosenWord = pickWord()
+      setWord(chosenWord)
+      setRound(nextRound)
+      setPhase("playing")
+      setTimeLeft(ROUND_SECONDS)
+      setRoundScore(0)
+      setGuessInput("")
+      setAttempts(0)
+      setAiFinished(false)
+      setAutoNextCountdown(null)
+      nudgesRef.current = { first: false, second: false }
+      setGuesses([])
+      canvasRef.current?.clear()
+    },
+    [pickWord]
+  )
 
   const handleStartGame = () => {
     setScore(0)
@@ -303,6 +311,24 @@ export default function Page() {
   }
 
   const handleNextRound = () => beginRound(round + 1)
+
+  useEffect(() => {
+    if (phase !== "won") return
+
+    const timer = window.setInterval(() => {
+      setAutoNextCountdown((current) => {
+        if (current === null) return null
+        if (current <= 1) {
+          window.clearInterval(timer)
+          beginRound(round + 1)
+          return null
+        }
+        return current - 1
+      })
+    }, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [phase, round, beginRound])
 
   const handleSubmitGuess = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -325,6 +351,7 @@ export default function Page() {
       )
       setRoundScore(earned)
       setScore((current) => current + earned)
+      setAutoNextCountdown(AUTO_NEXT_ROUND_SECONDS)
       setPhase("won")
       pushMessage("Yes! You got it.", "ai")
       return
@@ -425,6 +452,32 @@ export default function Page() {
               attempts={attempts}
             />
 
+            {phase === "won" || phase === "lost" ? (
+              <section className="animate-fade-in-up rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm font-semibold text-slate-700">
+                    {phase === "won"
+                      ? `Round cleared (+${roundScore} pts). Next round starts in ${autoNextCountdown ?? 0}s.`
+                      : `Round over. The drawing was ${word}.`}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleNextRound}
+                      className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+                    >
+                      Next Round
+                    </button>
+                    <button
+                      onClick={shareScore}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                    >
+                      Share Score
+                    </button>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
             <section className="grid gap-5 lg:grid-cols-[1fr_300px]">
               <div className="animate-fade-in-up rounded-3xl border border-slate-200/80 bg-white/92 p-4 shadow-[0_16px_36px_rgba(2,6,23,0.12)] md:p-5">
                 <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -469,57 +522,6 @@ export default function Page() {
 
               <GuessFeed guesses={guesses} />
             </section>
-
-            {phase === "won" ? (
-              <section className="mx-auto w-full max-w-2xl rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-center">
-                <h3 className="text-2xl font-bold text-emerald-800">
-                  Correct guess. Nice read.
-                </h3>
-                <p className="mt-1 text-sm text-emerald-700">
-                  +{roundScore} points.
-                </p>
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                  <button
-                    onClick={handleNextRound}
-                    className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
-                  >
-                    Next Round
-                  </button>
-                  <button
-                    onClick={shareScore}
-                    className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
-                  >
-                    Share Score
-                  </button>
-                </div>
-              </section>
-            ) : null}
-
-            {phase === "lost" ? (
-              <section className="mx-auto w-full max-w-2xl rounded-2xl border border-rose-200 bg-rose-50 p-5 text-center">
-                <h3 className="text-2xl font-bold text-rose-800">
-                  Time&apos;s up.
-                </h3>
-                <p className="mt-1 text-sm text-rose-700">
-                  The AI drew:{" "}
-                  <span className="font-semibold capitalize">{word}</span>
-                </p>
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                  <button
-                    onClick={handleNextRound}
-                    className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-600"
-                  >
-                    Try Next Round
-                  </button>
-                  <button
-                    onClick={shareScore}
-                    className="rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-800 hover:bg-rose-100"
-                  >
-                    Share Score
-                  </button>
-                </div>
-              </section>
-            ) : null}
           </>
         )}
       </div>
